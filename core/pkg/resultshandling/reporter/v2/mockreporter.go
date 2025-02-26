@@ -6,8 +6,11 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
 )
+
+var _ reporter.IReport = &ReportMock{}
 
 type ReportMock struct {
 	query   string
@@ -24,10 +27,7 @@ func (reportMock *ReportMock) Submit(_ context.Context, opaSessionObj *cautils.O
 	return nil
 }
 
-func (reportMock *ReportMock) SetCustomerGUID(customerGUID string) {
-}
-
-func (reportMock *ReportMock) SetClusterName(clusterName string) {
+func (reportMock *ReportMock) SetTenantConfig(tenantConfig cautils.ITenantConfig) {
 }
 
 func (reportMock *ReportMock) GetURL() string {
@@ -36,17 +36,19 @@ func (reportMock *ReportMock) GetURL() string {
 		return ""
 	}
 
-	q := u.Query()
-	q.Add("utm_source", "GitHub")
-	q.Add("utm_medium", "CLI")
-	q.Add("utm_campaign", "Submit")
-
-	u.RawQuery = q.Encode()
-
 	return u.String()
 }
 
-func (reportMock *ReportMock) DisplayReportURL() {
+func (reportMock *ReportMock) DisplayMessage() {
+	if m := reportMock.strToDisplay(); m != "" {
+		cautils.InfoTextDisplay(os.Stderr, m)
+	}
+}
+
+func (reportMock *ReportMock) strToDisplay() string {
+	if reportMock.message == "" {
+		return ""
+	}
 
 	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 	message := sep + "\n"
@@ -55,5 +57,5 @@ func (reportMock *ReportMock) DisplayReportURL() {
 		message += "For more details: " + link + "\n"
 	}
 	message += sep + "\n"
-	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n%s\n", message))
+	return fmt.Sprintf("\n%s\n", message)
 }

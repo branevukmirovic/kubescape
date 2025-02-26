@@ -1,13 +1,12 @@
 package docs
 
 import (
+	_ "embed"
 	"fmt"
 	"net/http"
 
-	_ "embed"
-
 	"github.com/go-openapi/runtime/middleware"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 )
 
 const (

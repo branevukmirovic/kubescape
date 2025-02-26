@@ -4,10 +4,9 @@ import (
 	"encoding/json"
 	"time"
 
-	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
-
 	"github.com/google/uuid"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/rbac-utils/rbacscanner"
 	"github.com/kubescape/rbac-utils/rbacutils"
 )
@@ -85,7 +84,7 @@ func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.Rbac
 		if err != nil {
 			return nil, err
 		}
-		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the the correct apiVersion?
+		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the correct apiVersion?
 		crIMeta := workloadinterface.NewWorkloadObj(crmap)
 		crIMeta.SetKind("ClusterRole")
 		allresources[crIMeta.GetID()] = crIMeta
@@ -95,7 +94,7 @@ func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.Rbac
 		if err != nil {
 			return nil, err
 		}
-		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the the correct apiVersion?
+		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the correct apiVersion?
 		crIMeta := workloadinterface.NewWorkloadObj(crmap)
 		crIMeta.SetKind("Role")
 		allresources[crIMeta.GetID()] = crIMeta
@@ -105,7 +104,7 @@ func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.Rbac
 		if err != nil {
 			return nil, err
 		}
-		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the the correct apiVersion?
+		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the correct apiVersion?
 		crIMeta := workloadinterface.NewWorkloadObj(crmap)
 		crIMeta.SetKind("ClusterRoleBinding")
 		allresources[crIMeta.GetID()] = crIMeta
@@ -115,7 +114,7 @@ func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.Rbac
 		if err != nil {
 			return nil, err
 		}
-		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the the correct apiVersion?
+		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the correct apiVersion?
 		crIMeta := workloadinterface.NewWorkloadObj(crmap)
 		crIMeta.SetKind("RoleBinding")
 		allresources[crIMeta.GetID()] = crIMeta

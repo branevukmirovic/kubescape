@@ -9,11 +9,12 @@ import (
 	"sort"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/shared"
 )
@@ -23,10 +24,8 @@ const (
 	junitOutputExt  = ".xml"
 )
 
-/*
-riskScore
-status
-*/
+var _ printer.IPrinter = &JunitPrinter{}
+
 type JunitPrinter struct {
 	writer  *os.File
 	verbose bool
@@ -100,20 +99,38 @@ func NewJunitPrinter(verbose bool) *JunitPrinter {
 }
 
 func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = junitOutputFile
-	}
-	if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
-		outputFile = outputFile + junitOutputExt
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = junitOutputFile
+		}
+		if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
+			outputFile = outputFile + junitOutputExt
+		}
 	}
 	jp.writer = printer.GetWriter(ctx, outputFile)
 }
 
 func (jp *JunitPrinter) Score(score float32) {
-	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", cautils.Float32ToInt(score))
+	// Handle invalid scores
+	if score > 100 {
+		score = 100
+	} else if score < 0 {
+		score = 0
+	}
+
+	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
 }
 
-func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (jp *JunitPrinter) PrintNextSteps() {
+
+}
+
+func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj == nil {
+		logger.L().Ctx(ctx).Error("failed to print results, missing data")
+		return
+	}
+
 	junitResult := testsSuites(opaSessionObj)
 	postureReportStr, err := xml.Marshal(junitResult)
 	if err != nil {
@@ -122,9 +139,9 @@ func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 
 	if _, err := jp.writer.Write(postureReportStr); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-	} else {
-		printer.LogOutputFile(jp.writer.Name())
+		return
 	}
+	printer.LogOutputFile(jp.writer.Name())
 }
 
 func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
@@ -169,9 +186,7 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControlsSummaries, classname string) []JUnitTestCase {
 	var testCases []JUnitTestCase
 
-	iter := controls.ListControlsIDs().All()
-	for iter.HasNext() {
-		cID := iter.Next()
+	for cID := range controls.ListControlsIDs(nil).All() {
 		testCase := JUnitTestCase{}
 		control := results.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, cID)
 
@@ -180,11 +195,14 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 
 		if control.GetStatus().IsFailed() {
 			resources := map[string]interface{}{}
-			resourceIDs := control.ListResourcesIDs().Failed()
-			for j := range resourceIDs {
-				resource := results.AllResources[resourceIDs[j]]
+			for rId, status := range control.ListResourcesIDs(nil).All() {
+				if status != apis.StatusFailed {
+					continue
+				}
+
+				resource := results.AllResources[rId]
 				sourcePath := ""
-				if ResourceSourcePath, ok := results.ResourceSource[resourceIDs[j]]; ok {
+				if ResourceSourcePath, ok := results.ResourceSource[rId]; ok {
 					sourcePath = ResourceSourcePath.RelativePath
 				}
 				resources[resourceToString(resource, sourcePath)] = nil
@@ -193,7 +211,6 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 			sort.Strings(resourcesStr)
 			testCaseFailure := JUnitFailure{}
 			testCaseFailure.Type = "Control"
-			// testCaseFailure.Contents =
 			testCaseFailure.Message = fmt.Sprintf("Remediation: %s\nMore details: %s\n\n%s", control.GetRemediation(), cautils.GetControlLink(control.GetID()), strings.Join(resourcesStr, "\n"))
 
 			testCase.Failure = &testCaseFailure
@@ -223,11 +240,11 @@ func resourceToString(resource workloadinterface.IMetadata, sourcePath string) s
 	return s
 }
 
-func properties(riskScore float32) []JUnitProperty {
+func properties(complianceScore float32) []JUnitProperty {
 	return []JUnitProperty{
 		{
-			Name:  "riskScore",
-			Value: fmt.Sprintf("%.2f", riskScore),
+			Name:  "complianceScore",
+			Value: fmt.Sprintf("%.2f", complianceScore),
 		},
 	}
 }

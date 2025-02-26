@@ -1,23 +1,22 @@
 package scan
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v3/cmd/shared"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/meta"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-
-	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	"github.com/kubescape/kubescape/v2/core/meta"
-
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +40,10 @@ var (
   Run '%[1]s list frameworks' for the list of supported frameworks
 `, cautils.ExecName())
 
-	ErrUnknownSeverity = errors.New("unknown severity")
+	ErrSecurityViewNotSupported = errors.New("security view is not supported for framework scan")
+	ErrBadThreshold             = errors.New("bad argument: out of range threshold")
+	ErrKeepLocalOrSubmit        = errors.New("you can use `keep-local` or `submit`, but not both")
+	ErrOmitRawResourcesOrSubmit = errors.New("you can use `omit-raw-resources` or `submit`, but not both")
 )
 
 func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
@@ -78,17 +80,18 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 			var frameworks []string
 
-			if len(args) == 0 { // scan all frameworks
+			if len(args) == 0 {
 				scanInfo.ScanAll = true
 			} else {
 				// Read frameworks from input args
 				frameworks = strings.Split(args[0], ",")
-				if cautils.StringInSlice(frameworks, "all") != cautils.ValueNotFound {
+				if slices.Contains(frameworks, "all") {
 					scanInfo.ScanAll = true
 					frameworks = getter.NativeFrameworks
+
 				}
 				if len(args) > 1 {
-					if len(args[1:]) == 0 || args[1] != "-" {
+					if args[1] != "-" {
 						scanInfo.InputPatterns = args[1:]
 						logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
 					} else { // store stdin to file - do NOT move to separate function !!
@@ -105,36 +108,37 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 					}
 				}
 			}
-			scanInfo.FrameworkScan = true
+			scanInfo.SetScanType(cautils.ScanTypeFramework)
 
 			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
 
-			ctx := context.TODO()
-			results, err := ks.Scan(ctx, scanInfo)
+			results, err := ks.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
 
-			if err = results.HandleResults(ctx); err != nil {
+			if err = results.HandleResults(ks.Context()); err != nil {
 				logger.L().Fatal(err.Error())
 			}
-			if !scanInfo.VerboseMode {
-				cautils.SimpleDisplay(os.Stderr, "Run with '--verbose'/'-v' flag for detailed resources view\n\n")
-			}
+
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
+			}
+			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
+				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance-score", fmt.Sprintf("%.2f", results.GetComplianceScore())), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
 			}
 
 			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
 			return nil
 		},
 	}
+
 }
 
 // countersExceedSeverityThreshold returns true if severity of failed controls exceed the set severity threshold, else returns false
 func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo) (bool, error) {
 	targetSeverity := scanInfo.FailThresholdSeverity
-	if err := validateSeverity(targetSeverity); err != nil {
+	if err := shared.ValidateSeverity(targetSeverity); err != nil {
 		return false, err
 	}
 
@@ -169,7 +173,7 @@ func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCou
 
 // terminateOnExceedingSeverity terminates the application on exceeding severity
 func terminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l helpers.ILogger) {
-	l.Fatal("result exceeds severity threshold", helpers.String("set severity threshold", scanInfo.FailThresholdSeverity))
+	l.Fatal("compliance result exceeds severity threshold", helpers.String("set severity threshold", scanInfo.FailThresholdSeverity))
 }
 
 // enforceSeverityThresholds ensures that the scan results are below the defined severity threshold
@@ -188,33 +192,29 @@ func enforceSeverityThresholds(severityCounters reportsummary.ISeverityCounters,
 	}
 }
 
-// validateSeverity returns an error if a given severity is not known, nil otherwise
-func validateSeverity(severity string) error {
-	for _, val := range reporthandlingapis.GetSupportedSeverities() {
-		if strings.EqualFold(severity, val) {
-			return nil
-		}
-	}
-	return ErrUnknownSeverity
-
-}
-
 // validateFrameworkScanInfo validates the scan info struct for the `scan framework` command
 func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
+	if scanInfo.View == string(cautils.SecurityViewType) {
+		scanInfo.View = string(cautils.ResourceViewType)
+	}
+
 	if scanInfo.Submit && scanInfo.Local {
-		return fmt.Errorf("you can use `keep-local` or `submit`, but not both")
+		return ErrKeepLocalOrSubmit
+	}
+	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
+		return ErrBadThreshold
 	}
 	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
-		return fmt.Errorf("bad argument: out of range threshold")
+		return ErrBadThreshold
 	}
 	if scanInfo.Submit && scanInfo.OmitRawResources {
-		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
+		return ErrOmitRawResourcesOrSubmit
 	}
 	severity := scanInfo.FailThresholdSeverity
-	if err := validateSeverity(severity); severity != "" && err != nil {
+	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {
 		return err
 	}
 
 	// Validate the user's credentials
-	return scanInfo.Credentials.Validate()
+	return cautils.ValidateAccountID(scanInfo.AccountID)
 }

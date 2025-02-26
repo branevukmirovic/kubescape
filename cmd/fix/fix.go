@@ -1,14 +1,12 @@
 package fix
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/meta"
-	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
-
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/meta"
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +15,7 @@ var fixCmdExamples = fmt.Sprintf(`
   Use with caution, this command will change your files in-place.
 
   # Fix kubernetes YAML manifest files based on a scan command output (output.json)
-  1) %[1]s scan --format json --format-version v2 --output output.json
+  1) %[1]s scan . --format json --output output.json
   2) %[1]s fix output.json
 
 `, cautils.ExecName())
@@ -27,7 +25,7 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 
 	fixCmd := &cobra.Command{
 		Use:     "fix <report output file>",
-		Short:   "Fix misconfiguration in files",
+		Short:   "Propose a fix for the misconfiguration found when scanning Kubernetes manifest files",
 		Long:    ``,
 		Example: fixCmdExamples,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -36,7 +34,7 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 			}
 			fixInfo.ReportFile = args[0]
 
-			return ks.Fix(context.TODO(), &fixInfo)
+			return ks.Fix(&fixInfo)
 		},
 	}
 

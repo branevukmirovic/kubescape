@@ -6,15 +6,14 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 
+	"github.com/google/uuid"
+	"github.com/gorilla/schema"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
-
-	"github.com/gorilla/schema"
-
-	logger "github.com/kubescape/go-logger"
-
-	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var OutputDir = "./results/"
@@ -29,19 +28,18 @@ type ScanResponse struct {
 }
 
 type HTTPHandler struct {
-	state            *serverState
-	scanResponseChan *scanResponseChan
-	scanRequestChan  chan *scanRequestParams
+	offline         bool
+	state           *serverState
+	scanRequestChan chan *scanRequestParams
 }
 
-func NewHTTPHandler() *HTTPHandler {
+func NewHTTPHandler(offline bool) *HTTPHandler {
 	handler := &HTTPHandler{
-		state:            newServerState(),
-		scanRequestChan:  make(chan *scanRequestParams),
-		scanResponseChan: newScanResponseChan(),
+		offline:         offline,
+		state:           newServerState(),
+		scanRequestChan: make(chan *scanRequestParams),
 	}
-	go handler.executeScan()
-
+	go handler.watchForScan()
 	return handler
 }
 
@@ -89,7 +87,6 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 // ============================================== SCAN ========================================================
 // Scan API
 func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
-
 	// generate id
 	scanID := uuid.NewString()
 
@@ -100,23 +97,19 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-
 	scanRequestParams, err := getScanParamsFromRequest(r, scanID)
 	if err != nil {
 		handler.writeError(w, err, "")
 		return
 	}
-	scanRequestParams.ctx = r.Context()
+	scanRequestParams.ctx = trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(r.Context()))
+
+	if handler.offline {
+		scanRequestParams.scanInfo.UseDefault = true
+		scanRequestParams.scanInfo.UseArtifactsFrom = getter.DefaultLocalStore
+	}
 
 	handler.state.setBusy(scanID)
-
-	response := &utilsmetav1.Response{}
-	response.ID = scanID
-	response.Type = utilsapisv1.BusyScanResponseType
-	response.Response = fmt.Sprintf("scanning '%s' is in progress", scanID)
-
-	handler.scanResponseChan.set(scanID) // add channel
-	defer handler.scanResponseChan.delete(scanID)
 
 	// you must use a goroutine since the executeScan function is not always listening to the channel
 	go func() {
@@ -125,9 +118,14 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		handler.scanRequestChan <- scanRequestParams
 	}()
 
-	if scanRequestParams.scanQueryParams.ReturnResults {
+	response := &utilsmetav1.Response{
+		ID:       scanID,
+		Type:     utilsapisv1.BusyScanResponseType,
+		Response: fmt.Sprintf("scanning '%s' is in progress", scanID),
+	}
+	if scanRequestParams.resp != nil {
 		// wait for scan to complete
-		response = <-handler.scanResponseChan.get(scanID)
+		response = <-scanRequestParams.resp
 
 		if scanRequestParams.scanQueryParams.KeepResults {
 			// delete results after returning

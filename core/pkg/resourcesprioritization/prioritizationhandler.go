@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 )
@@ -18,6 +19,17 @@ type ResourcesPrioritizationHandler struct {
 	resourceToAttackTracks map[string]v1alpha1.IAttackTrack
 	attackTracks           []v1alpha1.IAttackTrack
 	buildResourcesMap      bool
+}
+
+var supportedKinds = []string{
+	"Deployment",
+	"Pod",
+	"ReplicaSet",
+	"Node",
+	"DaemonSet",
+	"StatefulSet",
+	"Job",
+	"CronJob",
 }
 
 func NewResourcesPrioritizationHandler(ctx context.Context, attackTracksGetter getter.IAttackTracksGetter, buildResourcesMap bool) (*ResourcesPrioritizationHandler, error) {
@@ -48,7 +60,7 @@ func NewResourcesPrioritizationHandler(ctx context.Context, attackTracksGetter g
 	// Store attack tracks in cache
 	cache := getter.GetDefaultPath(cautils.LocalAttackTracksFilename)
 	if err := getter.SaveInFile(tracks, cache); err != nil {
-		logger.L().Ctx(ctx).Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("failed to cache attack track", helpers.String("file", cache), helpers.Error(err))
 	}
 
 	return handler, nil
@@ -77,9 +89,9 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 		if workload != nil && handler.isSupportedKind(workload) {
 			// build a map of attack track categories to a list of failed controls for the specific resource
-			failedControls := result.ListControlsIDs(nil).Failed()
-			if len(failedControls) > 0 {
-
+			controlsIds := result.ListControlsIDs(nil)
+			if controlsIds.Failed() > 0 {
+				failedControls := controlsIds.GetItems(apis.StatusFailed)
 				controlsLookup := v1alpha1.NewAttackTrackControlsLookup(handler.attackTracks, failedControls, allControls)
 				replicaCount := workload.GetReplicas()
 
@@ -146,16 +158,10 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 func (handler *ResourcesPrioritizationHandler) isSupportedKind(obj workloadinterface.IMetadata) bool {
 	if obj != nil {
-		switch obj.GetKind() {
-		case "Deployment",
-			"Pod",
-			"ReplicaSet",
-			"Node",
-			"DaemonSet",
-			"StatefulSet",
-			"Job",
-			"CronJob":
-			return true
+		for _, kind := range supportedKinds {
+			if obj.GetKind() == kind {
+				return true
+			}
 		}
 	}
 	return false

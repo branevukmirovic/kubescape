@@ -4,17 +4,12 @@ import "io"
 
 type SetConfig struct {
 	Account        string
-	ClientID       string
-	SecretKey      string
+	AccessKey      string
 	CloudReportURL string
 	CloudAPIURL    string
-	CloudUIURL     string
-	CloudAuthURL   string
 }
-
 type ViewConfig struct {
 	Writer io.Writer
 }
-
 type DeleteConfig struct {
 }

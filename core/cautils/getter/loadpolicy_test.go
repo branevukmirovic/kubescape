@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/kubescape/v3/internal/testutils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -386,7 +387,7 @@ func TestLoadPolicy(t *testing.T) {
 }
 
 func testFrameworkFile(framework string) string {
-	return filepath.Join(".", "testdata", fmt.Sprintf("%s.json", framework))
+	return filepath.Join(testutils.CurrentDir(), "testdata", fmt.Sprintf("%s.json", framework))
 }
 
 func writeTempJSONControlInputs(t testing.TB) (string, map[string][]string) {

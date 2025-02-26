@@ -3,9 +3,8 @@ package score
 import (
 	"fmt"
 
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/score"
-
-	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
 /*
@@ -29,7 +28,7 @@ const (
 
 func (su *ScoreWrapper) Calculate(reportVersion PostureReportVersion) error {
 	if reportVersion == EPostureReportV2 {
-		return su.scoreUtil.CalculatePostureReportV2(su.opaSessionObj.Report)
+		return su.scoreUtil.SetPostureReportComplianceScores(su.opaSessionObj.Report)
 	}
 
 	return fmt.Errorf("unsupported score calculator")

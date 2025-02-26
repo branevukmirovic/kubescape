@@ -7,13 +7,18 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
-
-	"github.com/kubescape/regolibrary/gitregostore"
+	"github.com/kubescape/regolibrary/v2/gitregostore"
 )
 
 // =======================================================================================================================
 // ======================================== DownloadReleasedPolicy =======================================================
 // =======================================================================================================================
+var (
+	_ IPolicyGetter         = &DownloadReleasedPolicy{}
+	_ IExceptionsGetter     = &DownloadReleasedPolicy{}
+	_ IAttackTracksGetter   = &DownloadReleasedPolicy{}
+	_ IControlsInputsGetter = &DownloadReleasedPolicy{}
+)
 
 // Use gitregostore to get policies from github release
 type DownloadReleasedPolicy struct {
@@ -22,7 +27,7 @@ type DownloadReleasedPolicy struct {
 
 func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	return &DownloadReleasedPolicy{
-		gs: gitregostore.NewDefaultGitRegoStore(-1),
+		gs: gitregostore.NewGitRegoStoreV2(-1),
 	}
 }
 
@@ -72,12 +77,12 @@ func (drp *DownloadReleasedPolicy) ListControls() ([]string, error) {
 	}
 	var controlsFrameworksList [][]string
 	for _, control := range controls {
-		controlsFrameworksList = append(controlsFrameworksList, control.FrameworkNames)
+		controlsFrameworksList = append(controlsFrameworksList, drp.gs.GetOpaFrameworkListByControlID(control.ControlID))
 	}
 	controlsNamesWithIDsandFrameworksList := make([]string, len(controlsIDsList))
 	// by design all slices have the same lengt
 	for i := range controlsIDsList {
-		controlsNamesWithIDsandFrameworksList[i] = fmt.Sprintf("%v|%v|%v", controlsIDsList[i], controlsNamesList[i], strings.Join(controlsFrameworksList[i], ","))
+		controlsNamesWithIDsandFrameworksList[i] = fmt.Sprintf("%v|%v|%v", controlsIDsList[i], controlsNamesList[i], strings.Join(controlsFrameworksList[i], ", "))
 	}
 	return controlsNamesWithIDsandFrameworksList, nil
 }
@@ -104,19 +109,6 @@ func (drp *DownloadReleasedPolicy) SetRegoObjects() error {
 		return nil
 	}
 	return drp.gs.SetRegoObjects()
-}
-
-func isNativeFramework(framework string) bool {
-	return contains(NativeFrameworks, framework)
-}
-
-func contains(s []string, str string) bool {
-	for _, v := range s {
-		if strings.EqualFold(v, str) {
-			return true
-		}
-	}
-	return false
 }
 
 func (drp *DownloadReleasedPolicy) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {

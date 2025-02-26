@@ -1,7 +1,7 @@
+permissions: read-all
 on:
   issues:
     types: [opened, labeled]
-
 jobs:
   open_PR_message:
     if: github.event.label.name == 'typo'
@@ -11,9 +11,6 @@ jobs:
         with:
           message: "Hello! :wave:\n\nThis issue is being automatically closed, Please open a PR with a relevant fix."
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-          
-          
   auto_close_issues:
     runs-on: ubuntu-latest
     steps:

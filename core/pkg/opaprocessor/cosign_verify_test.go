@@ -21,17 +21,26 @@ func Test_verify(t *testing.T) {
 		{
 			"valid signature",
 			args{
-				img: "hisu/cosign-tests:signed",
-				key: "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEGnMCUU0jGe6r4mPsPuyTXf61PE4e\nNwB/31SvUMmnoyd/1UxSqd+MRPXPU6pcub4k6E9G9SprVCuf6Sydcbyiqw==\n-----END PUBLIC KEY-----",
+				img: "quay.io/kubescape/kubescape:v3.0.3",
+				key: "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbgIMZrMTTlEFDLEeZXz+4R/908BG\nEeO70x6oMN7E4JQgzgbCB5rinqhK5t7dB61saVKQTb4P2NGtjPjXVbSTwQ==\n-----END PUBLIC KEY-----\n",
 			},
 			true,
 			assert.NoError,
 		},
 		{
-			"no signature",
+			"wrong signature",
 			args{
-				img: "hisu/cosign-tests:unsigned",
-				key: "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEGnMCUU0jGe6r4mPsPuyTXf61PE4e\nNwB/31SvUMmnoyd/1UxSqd+MRPXPU6pcub4k6E9G9SprVCuf6Sydcbyiqw==\n-----END PUBLIC KEY-----",
+				img: "quay.io/kubescape/kubescape:v2.9.2",
+				key: "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbgIMZrMTTlEFDLEeZXz+4R/908BG\nEeO70x6oMN7E4JQgzgbCB5rinqhK5t7dB61saVKQTb4P2NGtjPjXVbSTwQ==\n-----END PUBLIC KEY-----\n",
+			},
+			false,
+			assert.Error,
+		},
+		{
+			"no matching signature",
+			args{
+				img: "quay.io/kubescape/kubescape:v2.0.171",
+				key: "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbgIMZrMTTlEFDLEeZXz+4R/908BG\nEeO70x6oMN7E4JQgzgbCB5rinqhK5t7dB61saVKQTb4P2NGtjPjXVbSTwQ==\n-----END PUBLIC KEY-----\n",
 			},
 			false,
 			assert.Error,

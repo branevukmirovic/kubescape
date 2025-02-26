@@ -1,27 +1,77 @@
 package cautils
 
 import (
+	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
 	spinnerpkg "github.com/briandowns/spinner"
-	"github.com/fatih/color"
+	"github.com/jwalton/gchalk"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/mattn/go-isatty"
 	"github.com/schollz/progressbar/v3"
 )
 
-var FailureDisplay = color.New(color.Bold, color.FgHiRed).FprintfFunc()
-var WarningDisplay = color.New(color.Bold, color.FgHiYellow).FprintfFunc()
-var FailureTextDisplay = color.New(color.Faint, color.FgHiRed).FprintfFunc()
-var InfoDisplay = color.New(color.Bold, color.FgCyan).FprintfFunc()
-var InfoTextDisplay = color.New(color.Bold, color.FgHiYellow).FprintfFunc()
-var SimpleDisplay = color.New().FprintfFunc()
-var SuccessDisplay = color.New(color.Bold, color.FgHiGreen).FprintfFunc()
-var DescriptionDisplay = color.New(color.Faint, color.FgWhite).FprintfFunc()
+func FailureDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithBrightRed().Bold(format), a...)
+}
+
+func WarningDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithBrightYellow().Bold(format), a...)
+}
+
+func FailureTextDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithBrightRed().Dim(format), a...)
+}
+
+func InfoDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithBrightWhite().Bold(format), a...)
+}
+
+func InfoTextDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithBrightYellow().Bold(format), a...)
+}
+
+func SimpleDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.White(format), a...)
+}
+
+func SuccessDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithBlue().Bold(format), a...)
+}
+
+func DescriptionDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithWhite().Dim(format), a...)
+}
+
+func BoldDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.Bold(format), a...)
+}
+
+func LineDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithAnsi256(238).Bold(format), a...)
+}
+
+func SectionHeadingDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, "\n"+
+		gchalk.WithBrightWhite().Bold(format)+
+		gchalk.WithAnsi256(238).Bold(fmt.Sprintf("\n%s\n\n", strings.Repeat("─", len(format)))), a...)
+}
+
+func StarDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithAnsi256(238).Bold("* ")+gchalk.White(format), a...)
+}
 
 var spinner *spinnerpkg.Spinner
 
 func StartSpinner() {
+	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
+		return
+	}
+
 	if spinner != nil {
 		if !spinner.Active() {
 			spinner.Start()
@@ -42,8 +92,8 @@ func StopSpinner() {
 }
 
 type ProgressHandler struct {
-	title string
 	pb    *progressbar.ProgressBar
+	title string
 }
 
 func NewProgressHandler(title string) *ProgressHandler {
@@ -51,11 +101,11 @@ func NewProgressHandler(title string) *ProgressHandler {
 }
 
 func (p *ProgressHandler) Start(allSteps int) {
-	if isatty.IsTerminal(os.Stderr.Fd()) {
-		p.pb = progressbar.Default(int64(allSteps), p.title)
-	} else {
+	if !isatty.IsTerminal(os.Stderr.Fd()) || helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
 		p.pb = progressbar.DefaultSilent(int64(allSteps), p.title)
+		return
 	}
+	p.pb = progressbar.Default(int64(allSteps), p.title)
 }
 
 func (p *ProgressHandler) ProgressJob(step int, message string) {

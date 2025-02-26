@@ -9,10 +9,10 @@ import (
 	"sort"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -25,6 +25,8 @@ const (
 
 //go:embed html/report.gohtml
 var reportTemplate string
+
+var _ printer.IPrinter = &HtmlPrinter{}
 
 type HTMLReportingCtx struct {
 	OPASessionObj     *cautils.OPASessionObj
@@ -40,16 +42,27 @@ func NewHtmlPrinter() *HtmlPrinter {
 }
 
 func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = htmlOutputFile
-	}
-	if filepath.Ext(strings.TrimSpace(outputFile)) != htmlOutputExt {
-		outputFile = outputFile + htmlOutputExt
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = htmlOutputFile
+		}
+		if filepath.Ext(strings.TrimSpace(outputFile)) != htmlOutputExt {
+			outputFile = outputFile + htmlOutputExt
+		}
 	}
 	hp.writer = printer.GetWriter(ctx, outputFile)
 }
 
-func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (hp *HtmlPrinter) PrintNextSteps() {
+
+}
+
+func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj == nil {
+		logger.L().Ctx(ctx).Error("failed to print results, missing data")
+		return
+	}
+
 	tplFuncMap := template.FuncMap{
 		"sum": func(nums ...int) int {
 			total := 0
@@ -108,9 +121,9 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))
-	} else {
-		printer.LogOutputFile(hp.writer.Name())
+		return
 	}
+	printer.LogOutputFile(hp.writer.Name())
 
 }
 
@@ -135,7 +148,7 @@ func buildResourceControlResult(resourceControl resourcesresults.ResourceAssocia
 	ctlName := resourceControl.GetName()
 	ctlID := resourceControl.GetID()
 	ctlURL := cautils.GetControlLink(resourceControl.GetID())
-	failedPaths := append(failedPathsToString(&resourceControl), fixPathsToString(&resourceControl)...)
+	failedPaths := AssistedRemediationPathsToString(&resourceControl)
 
 	return ResourceControlResult{ctlSeverity, ctlName, ctlID, ctlURL, failedPaths}
 }

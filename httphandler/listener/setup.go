@@ -6,29 +6,31 @@ import (
 	"net/http"
 	"os"
 
-	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/httphandler/docs"
-	handlerequestsv1 "github.com/kubescape/kubescape/v2/httphandler/handlerequests/v1"
-
 	"github.com/gorilla/mux"
+	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v3/core/metrics"
+	"github.com/kubescape/kubescape/v3/httphandler/docs"
+	handlerequestsv1 "github.com/kubescape/kubescape/v3/httphandler/handlerequests/v1"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
 )
 
 const (
-	scanPath              = "/v1/scan"
-	statusPath            = "/v1/status"
-	resultsPath           = "/v1/results"
-	prometheusMetricsPath = "/v1/metrics"
-	livePath              = "/livez"
-	readyPath             = "/readyz"
+	// v1 paths
+	v1PathPrefix            = "/v1"
+	v1ScanPath              = "/scan"
+	v1StatusPath            = "/status"
+	v1ResultsPath           = "/results"
+	v1PrometheusMetricsPath = "/metrics"
+
+	// healtcheck paths
+	livePath  = "/livez"
+	readyPath = "/readyz"
 )
 
 // SetupHTTPListener set up listening http servers
 func SetupHTTPListener() error {
-	initialize()
-
 	keyPair, err := loadTLSKey("", "") // TODO - support key and crt files
 	if err != nil {
 		return err
@@ -40,27 +42,33 @@ func SetupHTTPListener() error {
 		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*keyPair}}
 	}
 
-	rtr := mux.NewRouter()
-	rtr.Use(otelmux.Middleware("kubescape-svc"))
-	// rtr.HandleFunc(opapolicy.PostureRestAPIPathV1, resthandler.RestAPIReceiveNotification)
-
-	// listen
-	httpHandler := handlerequestsv1.NewHTTPHandler()
-
-	rtr.HandleFunc(prometheusMetricsPath, httpHandler.Metrics)
-	rtr.HandleFunc(scanPath, httpHandler.Scan)
-	rtr.HandleFunc(statusPath, httpHandler.Status)
-	rtr.HandleFunc(resultsPath, httpHandler.Results)
-	rtr.HandleFunc(livePath, httpHandler.Live)
-	rtr.HandleFunc(readyPath, httpHandler.Ready)
+	httpHandler := handlerequestsv1.NewHTTPHandler(getOffline())
 
 	// Setup the OpenAPI UI handler
-	handler := docs.NewOpenAPIUIHandler()
-	rtr.PathPrefix(docs.OpenAPIV2Prefix).Methods("GET").Handler(handler)
+	openApiHandler := docs.NewOpenAPIUIHandler()
+
+	rtr := mux.NewRouter()
+
+	// non-monitored endpoints
+	rtr.HandleFunc(livePath, httpHandler.Live)
+	rtr.HandleFunc(readyPath, httpHandler.Ready)
+	rtr.PathPrefix(docs.OpenAPIV2Prefix).Methods("GET").Handler(openApiHandler)
+
+	// OpenTelemetry middleware for monitored endpoints
+	otelMiddleware := otelmux.Middleware("kubescape-svc")
+	v1SubRouter := rtr.PathPrefix(v1PathPrefix).Subrouter()
+	v1SubRouter.Use(otelMiddleware)
+	v1SubRouter.HandleFunc(v1PrometheusMetricsPath, httpHandler.Metrics) // deprecated
+	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.Scan)
+	v1SubRouter.HandleFunc(v1StatusPath, httpHandler.Status)
+	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.Results)
+
+	// OpenTelemetry metrics initialization
+	metrics.Init()
 
 	server.Handler = rtr
 
-	logger.L().Info("Started Kubescape server", helpers.String("port", getPort()), helpers.String("version", cautils.BuildNumber))
+	logger.L().Info("Started Kubescape server", helpers.String("port", getPort()), helpers.String("version", versioncheck.BuildNumber))
 
 	servePprof()
 
@@ -80,6 +88,10 @@ func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
 		return nil, fmt.Errorf("failed to load key pair: %v", err)
 	}
 	return &pair, nil
+}
+
+func getOffline() bool {
+	return os.Getenv("KS_OFFLINE") == "true"
 }
 
 func getPort() string {

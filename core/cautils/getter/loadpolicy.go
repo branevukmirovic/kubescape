@@ -23,10 +23,14 @@ var (
 	ErrNameRequired         = errors.New("missing required input framework name")
 	ErrIDRequired           = errors.New("missing required input control ID")
 	ErrFrameworkNotMatching = errors.New("framework from file not matching")
-	ErrControlNotMatching   = errors.New("framework from file not matching")
+	ErrControlNotMatching   = errors.New("control from file not matching")
+)
 
-	_ IPolicyGetter     = &LoadPolicy{}
-	_ IExceptionsGetter = &LoadPolicy{}
+var (
+	_ IPolicyGetter         = &LoadPolicy{}
+	_ IExceptionsGetter     = &LoadPolicy{}
+	_ IAttackTracksGetter   = &LoadPolicy{}
+	_ IControlsInputsGetter = &LoadPolicy{}
 )
 
 func getCacheDir() string {

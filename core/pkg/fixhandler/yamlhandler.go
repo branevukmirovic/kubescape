@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
-
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,8 +22,6 @@ func decodeDocumentRoots(yamlAsString string) ([]yaml.Node, error) {
 		var node yaml.Node
 		err := dec.Decode(&node)
 
-		nodes = append(nodes, node)
-
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -32,6 +29,8 @@ func decodeDocumentRoots(yamlAsString string) ([]yaml.Node, error) {
 			return nil, fmt.Errorf("Cannot Decode File as YAML")
 
 		}
+
+		nodes = append(nodes, node)
 	}
 
 	return nodes, nil
@@ -182,7 +181,7 @@ func addLinesToRemove(ctx context.Context, fixInfoMetadata *fixInfoMetadata) (in
 	newOriginalListTracker := updateTracker(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
 	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, linesToRemove{
 		startLine: currentDFSNode.node.Line,
-		endLine:   getNodeLine(fixInfoMetadata.originalList, newOriginalListTracker),
+		endLine:   getNodeLine(fixInfoMetadata.originalList, newOriginalListTracker-1), // newOriginalListTracker is the next node
 	})
 
 	return newOriginalListTracker, fixInfoMetadata.fixedListTracker

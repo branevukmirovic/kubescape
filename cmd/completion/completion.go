@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/spf13/cobra"
 )
 
@@ -15,8 +15,8 @@ var completionCmdExamples = fmt.Sprintf(`
   $ echo 'source <(%[1]s completion bash)' >> ~/.bashrc
 
   # Enable ZSH shell autocompletion
-  $ source <(kubectl completion zsh)
-  $ echo 'source <(kubectl completion zsh)' >> "${fpath[1]}/_kubectl"
+  $ source <(%[1]s completion zsh)
+  $ echo 'source <(%[1]s completion zsh)' >> "${fpath[1]}/_%[1]s"
 `, cautils.ExecName())
 
 func GetCompletionCmd() *cobra.Command {
@@ -29,6 +29,12 @@ func GetCompletionCmd() *cobra.Command {
 		ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
 		Args:                  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		Run: func(cmd *cobra.Command, args []string) {
+			// Check if args array is not empty
+			if len(args) == 0 {
+				fmt.Println("No arguements provided.")
+				return
+			}
+
 			switch strings.ToLower(args[0]) {
 			case "bash":
 				cmd.Root().GenBashCompletion(os.Stdout)
@@ -38,6 +44,8 @@ func GetCompletionCmd() *cobra.Command {
 				cmd.Root().GenFishCompletion(os.Stdout, true)
 			case "powershell":
 				cmd.Root().GenPowerShellCompletionWithDesc(os.Stdout)
+			default:
+				fmt.Printf("Invalid arguement %s", args[0])
 			}
 		},
 	}

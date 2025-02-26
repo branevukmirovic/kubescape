@@ -4,41 +4,38 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/fatih/color"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/jwalton/gchalk"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/olekukonko/tablewriter"
 )
 
-const (
-	columnSeverity      = iota
-	columnName          = iota
-	columnCounterFailed = iota
-	columnCounterAll    = iota
-	columnRiskScore     = iota
-	_rowLen             = iota
-)
+const controlNameMaxLength = 70
 
-func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars, verbose bool) []string {
-	row := make([]string, _rowLen)
+type TableRow struct {
+	ref             string
+	name            string
+	counterFailed   string
+	counterAll      string
+	severity        string
+	complianceScore string
+}
 
-	// ignore passed results
-	if !verbose && (controlSummary.GetStatus().IsPassed()) {
-		return []string{}
+// generateTableRow is responsible for generating the row that will be printed in the table
+func generateTableRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) *TableRow {
+	tableRow := &TableRow{
+		ref:             controlSummary.GetID(),
+		name:            controlSummary.GetName(),
+		counterFailed:   fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()),
+		counterAll:      fmt.Sprintf("%d", controlSummary.NumberOfResources().All()),
+		severity:        apis.ControlSeverityToString(controlSummary.GetScoreFactor()),
+		complianceScore: getComplianceScoreColumn(controlSummary, infoToPrintInfo),
+	}
+	if len(controlSummary.GetName()) > controlNameMaxLength {
+		tableRow.name = controlSummary.GetName()[:controlNameMaxLength] + "..."
 	}
 
-	row[columnSeverity] = getSeverityColumn(controlSummary)
-	if len(controlSummary.GetName()) > 50 {
-		row[columnName] = controlSummary.GetName()[:50] + "..."
-	} else {
-		row[columnName] = controlSummary.GetName()
-	}
-	row[columnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
-	row[columnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
-	row[columnRiskScore] = getRiskScoreColumn(controlSummary, infoToPrintInfo)
-
-	return row
+	return tableRow
 }
 
 func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
@@ -50,28 +47,34 @@ func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo
 	return ""
 }
 
-func getRiskScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
+func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
 	if controlSummary.GetStatus().IsSkipped() {
 		return fmt.Sprintf("%s %s", "Action Required", getInfoColumn(controlSummary, infoToPrintInfo))
 	}
-	return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetScore())) + "%"
+	if compliance := cautils.Float32ToInt(controlSummary.GetComplianceScore()); compliance < 0 {
+		return "N/A"
+	} else {
+		return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetComplianceScore())) + "%"
+	}
+
 }
 
 func getSeverityColumn(controlSummary reportsummary.IControlSummary) string {
-	return color.New(getColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor())), color.Bold).SprintFunc()(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
+	return getColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor()))(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
 }
-func getColor(controlSeverity int) color.Attribute {
+
+func getColor(controlSeverity int) func(...string) string {
 	switch controlSeverity {
 	case apis.SeverityCritical:
-		return color.FgRed
+		return gchalk.WithAnsi256(1).Bold
 	case apis.SeverityHigh:
-		return color.FgYellow
+		return gchalk.WithAnsi256(196).Bold
 	case apis.SeverityMedium:
-		return color.FgCyan
+		return gchalk.WithAnsi256(166).Bold
 	case apis.SeverityLow:
-		return color.FgWhite
+		return gchalk.WithAnsi256(220).Bold
 	default:
-		return color.FgWhite
+		return gchalk.WithAnsi256(16).Bold
 	}
 }
 
@@ -86,39 +89,4 @@ func getSortedControlsIDs(controls reportsummary.ControlSummaries) [][]string {
 		sort.Strings(controlIDs[i])
 	}
 	return controlIDs
-}
-
-/* unused for now
-func getSortedControlsNames(controls reportsummary.ControlSummaries) [][]string {
-	controlNames := make([][]string, 5)
-	for k := range controls {
-		c := controls[k]
-		i := apis.ControlSeverityToInt(c.GetScoreFactor())
-		controlNames[i] = append(controlNames[i], c.GetName())
-	}
-	for i := range controlNames {
-		sort.Strings(controlNames[i])
-	}
-	return controlNames
-}
-*/
-
-func getControlTableHeaders() []string {
-	headers := make([]string, _rowLen)
-	headers[columnName] = "CONTROL NAME"
-	headers[columnCounterFailed] = "FAILED RESOURCES"
-	headers[columnCounterAll] = "ALL RESOURCES"
-	headers[columnSeverity] = "SEVERITY"
-	headers[columnRiskScore] = "% RISK-SCORE"
-	return headers
-}
-
-func getColumnsAlignments() []int {
-	alignments := make([]int, _rowLen)
-	alignments[columnName] = tablewriter.ALIGN_LEFT
-	alignments[columnCounterFailed] = tablewriter.ALIGN_CENTER
-	alignments[columnCounterAll] = tablewriter.ALIGN_CENTER
-	alignments[columnSeverity] = tablewriter.ALIGN_LEFT
-	alignments[columnRiskScore] = tablewriter.ALIGN_CENTER
-	return alignments
 }

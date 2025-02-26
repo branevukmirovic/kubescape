@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"os"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/anchore/grype/grype/presenter/models"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
+
+var _ printer.IPrinter = &PrometheusPrinter{}
 
 type PrometheusPrinter struct {
 	writer      *os.File
@@ -25,12 +28,23 @@ func NewPrometheusPrinter(verboseMode bool) *PrometheusPrinter {
 	}
 }
 
+func (pp *PrometheusPrinter) PrintNextSteps() {
+
+}
+
 func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
 	pp.writer = printer.GetWriter(ctx, outputFile)
 }
 
 func (pp *PrometheusPrinter) Score(score float32) {
-	fmt.Printf("\n# Overall risk-score (0- Excellent, 100- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
+	// Handle invalid scores
+	if score > 100 {
+		score = 100
+	} else if score < 0 {
+		score = 0
+	}
+
+	fmt.Printf("\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
 }
 
 func (pp *PrometheusPrinter) generatePrometheusFormat(
@@ -39,19 +53,26 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 	summaryDetails *reportsummary.SummaryDetails) *Metrics {
 
 	m := &Metrics{}
-	m.setRiskScores(summaryDetails)
+	m.setComplianceScores(summaryDetails)
 	// m.setResourcesCounters(resources, results)
 
 	return m
 }
 
-func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (pp *PrometheusPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
+}
+
+func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj == nil {
+		logger.L().Ctx(ctx).Error("failed to print results, missing data")
+		return
+	}
 
 	metrics := pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails)
 
 	if _, err := pp.writer.Write([]byte(metrics.String())); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-	} else {
-		printer.LogOutputFile(pp.writer.Name())
+		return
 	}
+	printer.LogOutputFile(pp.writer.Name())
 }

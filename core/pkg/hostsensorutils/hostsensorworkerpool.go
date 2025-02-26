@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 )
@@ -14,7 +14,7 @@ const noOfWorkers int = 10
 type job struct {
 	podName     string
 	nodeName    string
-	requestKind string
+	requestKind scannerResource
 	path        string
 }
 
@@ -25,7 +25,7 @@ type workerPool struct {
 	noOfWorkers int
 }
 
-func NewWorkerPool() workerPool {
+func newWorkerPool() workerPool {
 	wp := workerPool{}
 	wp.noOfWorkers = noOfWorkers
 	wp.init()
@@ -43,22 +43,23 @@ func (wp *workerPool) init(noOfPods ...int) {
 }
 
 // The worker takes a job out of the chan, executes the request, and pushes the result to the results chan
-func (wp *workerPool) hostSensorWorker(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup) {
+func (wp *workerPool) hostSensorWorker(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup, log *LogsMap) {
 	defer wg.Done()
 	for job := range wp.jobs {
 		hostSensorDataEnvelope, err := hsh.getResourcesFromPod(job.podName, job.nodeName, job.requestKind, job.path)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("failed to get data", helpers.String("path", job.path), helpers.String("podName", job.podName), helpers.Error(err))
-		} else {
-			wp.results <- hostSensorDataEnvelope
+		if err != nil && !log.isDuplicated(failedToGetData) {
+			logger.L().Ctx(ctx).Warning(failedToGetData, helpers.String("path", job.path), helpers.Error(err))
+			log.update(failedToGetData)
+			continue
 		}
+		wp.results <- hostSensorDataEnvelope
 	}
 }
 
-func (wp *workerPool) createWorkerPool(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup) {
+func (wp *workerPool) createWorkerPool(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup, log *LogsMap) {
 	for i := 0; i < noOfWorkers; i++ {
 		wg.Add(1)
-		go wp.hostSensorWorker(ctx, hsh, wg)
+		go wp.hostSensorWorker(ctx, hsh, wg, log)
 	}
 }
 
@@ -80,7 +81,7 @@ func (wp *workerPool) hostSensorGetResults(result *[]hostsensor.HostSensorDataEn
 	}()
 }
 
-func (wp *workerPool) hostSensorApplyJobs(podList map[string]string, path, requestKind string) {
+func (wp *workerPool) hostSensorApplyJobs(podList map[string]string, path string, requestKind scannerResource) {
 	go func() {
 		for podName, nodeName := range podList {
 			thisJob := job{

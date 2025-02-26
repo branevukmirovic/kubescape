@@ -1,14 +1,20 @@
 package v1
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"k8s.io/utils/strings/slices"
-
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
 func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
@@ -17,7 +23,10 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 	setTargetInScanInfo(scanRequest, scanInfo)
 
 	if scanRequest.Account != "" {
-		scanInfo.Credentials.Account = scanRequest.Account
+		scanInfo.AccountID = scanRequest.Account
+	}
+	if scanRequest.AccessKey != "" {
+		scanInfo.AccessKey = scanRequest.AccessKey
 	}
 	if len(scanRequest.ExcludedNamespaces) > 0 {
 		scanInfo.ExcludedNamespaces = strings.Join(scanRequest.ExcludedNamespaces, ",")
@@ -56,22 +65,34 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 		scanInfo.HostSensorEnabled = cautils.NewBoolPtr(scanRequest.HostScanner)
 	}
 
+	// single resource scan
+	if scanRequest.ScanObject != nil {
+		scanInfo.ScanObject = scanRequest.ScanObject
+	}
+
+	if scanRequest.IsDeletedScanObject != nil {
+		scanInfo.IsDeletedScanObject = *scanRequest.IsDeletedScanObject
+	}
+
+	if scanRequest.Exceptions != nil {
+		path, err := saveExceptions(scanRequest.Exceptions)
+		if err != nil {
+			logger.L().Warning("failed to save exceptions, scanning without them", helpers.Error(err))
+		} else {
+			scanInfo.UseExceptions = path
+		}
+	}
+
 	return scanInfo
 }
 
 func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cautils.ScanInfo) {
-	// remove empty targets from slice
-	scanRequest.TargetNames = slices.Filter(nil, scanRequest.TargetNames, func(e string) bool { return e != "" })
-
 	if scanRequest.TargetType != "" && len(scanRequest.TargetNames) > 0 {
 		if strings.EqualFold(string(scanRequest.TargetType), string(apisv1.KindFramework)) {
 			scanRequest.TargetType = apisv1.KindFramework
 			scanInfo.FrameworkScan = true
-			scanInfo.ScanAll = false
-			if cautils.StringInSlice(scanRequest.TargetNames, "all") != cautils.ValueNotFound { // if scan all frameworks
-				scanRequest.TargetNames = []string{}
-				scanInfo.ScanAll = true
-			}
+			scanInfo.ScanAll = slices.Contains(scanRequest.TargetNames, "all") || slices.Contains(scanRequest.TargetNames, "")
+			scanRequest.TargetNames = slices.Filter(nil, scanRequest.TargetNames, func(e string) bool { return e != "" && e != "all" })
 		} else if strings.EqualFold(string(scanRequest.TargetType), string(apisv1.KindControl)) {
 			scanRequest.TargetType = apisv1.KindControl
 			scanInfo.ScanAll = false
@@ -86,4 +107,16 @@ func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cau
 		scanInfo.FrameworkScan = true
 		scanInfo.ScanAll = true
 	}
+}
+
+func saveExceptions(exceptions []armotypes.PostureExceptionPolicy) (string, error) {
+	exceptionsJSON, err := json.Marshal(exceptions)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal exceptions: %w", err)
+	}
+	exceptionsPath := filepath.Join("/tmp", "exceptions.json") // FIXME potential race condition
+	if err := os.WriteFile(exceptionsPath, exceptionsJSON, 0644); err != nil {
+		return "", fmt.Errorf("failed to write exceptions file to disk: %w", err)
+	}
+	return exceptionsPath, nil
 }
