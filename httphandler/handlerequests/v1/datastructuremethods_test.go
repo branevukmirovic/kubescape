@@ -85,6 +85,22 @@ func TestToScanInfo(t *testing.T) {
 	}
 }
 
+func TestToScanInfoExceptionsCleanup(t *testing.T) {
+	req := &utilsmetav1.PostScanRequest{
+		Exceptions: []armotypes.PostureExceptionPolicy{
+			{PortalBase: armotypes.PortalBase{Name: "ex"}},
+		},
+	}
+	s := ToScanInfo(req)
+	require.NotEmpty(t, s.UseExceptions)
+	_, err := os.Stat(s.UseExceptions)
+	require.NoError(t, err)
+
+	s.Cleanup()
+	_, err = os.Stat(s.UseExceptions)
+	assert.True(t, os.IsNotExist(err), "expected exceptions temp file to be removed by Cleanup, got err=%v", err)
+}
+
 func TestSaveExceptions(t *testing.T) {
 	{
 		exceptions := []armotypes.PostureExceptionPolicy{

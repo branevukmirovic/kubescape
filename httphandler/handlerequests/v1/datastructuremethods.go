@@ -79,6 +79,7 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 			logger.L().Warning("failed to save exceptions, scanning without them", helpers.Error(err))
 		} else {
 			scanInfo.UseExceptions = path
+			scanInfo.AddCleanup(func() { _ = os.Remove(path) })
 		}
 	}
 

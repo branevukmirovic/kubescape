@@ -167,6 +167,10 @@ func (scanInfo *ScanInfo) Cleanup() {
 	}
 }
 
+func (scanInfo *ScanInfo) AddCleanup(cleanup func()) {
+	scanInfo.cleanups = append(scanInfo.cleanups, cleanup)
+}
+
 func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 	if scanInfo.UseArtifactsFrom == "" {
 		return
