@@ -87,23 +87,20 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	sessionObj.ResourceToControlsMap = resourceToControl
 
 	// pull k8s resources
-	k8sResourcesMap, allResources, failedGVRs := k8sHandler.pullResources(queryableResources, globalFieldSelectors)
-	if len(allResources) == 0 && len(failedGVRs) > 0 {
-		// Every resource type failed — nothing was collected; treat as fatal.
+	k8sResourcesMap, allResources, failedQueries := k8sHandler.pullResources(queryableResources, globalFieldSelectors)
+	if len(allResources) == 0 && len(failedQueries) > 0 {
+		// Every query failed — nothing was collected; treat as fatal.
 		var combined []string
-		for gvr, e := range failedGVRs {
-			combined = append(combined, fmt.Sprintf("%s: %s", gvr, e.Error()))
+		for _, f := range failedQueries {
+			combined = append(combined, fmt.Sprintf("%s: %s", f.gvr, f.err.Error()))
 		}
 		cautils.StopSpinner()
 		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, fmt.Errorf("failed to pull any Kubernetes resources: %s", strings.Join(combined, "; "))
 	}
-	for gvr, e := range failedGVRs {
-		if len(k8sResourcesMap[gvr]) > 0 {
-			continue
-		}
+	for _, f := range failedQueries {
 		logger.L().Ctx(ctx).Warning("failed to pull resource type; affected controls will be marked skipped",
-			helpers.String("gvr", gvr), helpers.Error(e))
-		cautils.SetInfoMapForResources(e.Error(), []string{gvr}, sessionObj.InfoMap)
+			helpers.String("gvr", f.gvr), helpers.Error(f.err))
+		cautils.SetInfoMapForResources(f.err.Error(), []string{f.gvr}, sessionObj.InfoMap)
 	}
 
 	// add single resource to k8s resources map (for single resource scan)
@@ -323,18 +320,31 @@ func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[strin
 	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
-func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources, globalFieldSelectors IFieldSelector) (cautils.K8SResources, map[string]workloadinterface.IMetadata, map[string]error) {
+// queryFailure records a failed pull at query granularity (GVR + field selectors).
+type queryFailure struct {
+	gvr string
+	err error
+}
+
+func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources, globalFieldSelectors IFieldSelector) (cautils.K8SResources, map[string]workloadinterface.IMetadata, map[string]queryFailure) {
 	k8sResources := queryableResources.ToK8sResourceMap()
 	allResources := map[string]workloadinterface.IMetadata{}
 
-	failedGVRs := map[string]error{}
+	// keyed by QueryableResource.String() (GVR + field selectors) so a failure on
+	// one selector variant is never suppressed by a success on a different variant
+	// for the same raw GVR.
+	failedQueries := map[string]queryFailure{}
 	for i := range queryableResources {
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(queryableResources[i].GroupVersionResourceTriplet)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 		result, err := k8sHandler.pullSingleResource(&gvr, nil, queryableResources[i].FieldSelectors, globalFieldSelectors)
 		if err != nil {
 			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
-				failedGVRs[queryableResources[i].GroupVersionResourceTriplet] = err
+				qr := queryableResources[i]
+			failedQueries[qr.String()] = queryFailure{
+					gvr: queryableResources[i].GroupVersionResourceTriplet,
+					err: err,
+				}
 			}
 			continue
 		}
@@ -352,7 +362,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 		}
 	}
 
-	return k8sResources, allResources, failedGVRs
+	return k8sResources, allResources, failedQueries
 }
 
 func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, error) {
