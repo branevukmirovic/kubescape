@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -114,9 +113,18 @@ func saveExceptions(exceptions []armotypes.PostureExceptionPolicy) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal exceptions: %w", err)
 	}
-	exceptionsPath := filepath.Join("/tmp", "exceptions.json") // FIXME potential race condition
-	if err := os.WriteFile(exceptionsPath, exceptionsJSON, 0644); err != nil {
+	f, err := os.CreateTemp("", "kubescape-exceptions-*.json")
+	if err != nil {
+		return "", fmt.Errorf("failed to create exceptions file: %w", err)
+	}
+	if _, err := f.Write(exceptionsJSON); err != nil {
+		f.Close()
+		os.Remove(f.Name())
 		return "", fmt.Errorf("failed to write exceptions file to disk: %w", err)
 	}
-	return exceptionsPath, nil
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("failed to close exceptions file: %w", err)
+	}
+	return f.Name(), nil
 }

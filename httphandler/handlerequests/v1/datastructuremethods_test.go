@@ -1,8 +1,12 @@
 package v1
 
 import (
+	"encoding/json"
+	"os"
+	"sync"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
@@ -78,6 +82,67 @@ func TestToScanInfo(t *testing.T) {
 		assert.Equal(t, "nginx", s.ScanObject.GetName())
 		assert.Equal(t, "ns1", s.ScanObject.GetNamespace())
 	}
+}
+
+func TestSaveExceptions(t *testing.T) {
+	{
+		exceptions := []armotypes.PostureExceptionPolicy{
+			{PolicyType: "postureExceptionPolicy", PortalBase: armotypes.PortalBase{Name: "ex-A"}},
+		}
+		path, err := saveExceptions(exceptions)
+		assert.NoError(t, err)
+		defer os.Remove(path)
+
+		buf, err := os.ReadFile(path)
+		assert.NoError(t, err)
+		var got []armotypes.PostureExceptionPolicy
+		assert.NoError(t, json.Unmarshal(buf, &got))
+		assert.Equal(t, exceptions, got)
+	}
+	{
+		exceptions := []armotypes.PostureExceptionPolicy{{PortalBase: armotypes.PortalBase{Name: "ex"}}}
+		p1, err := saveExceptions(exceptions)
+		assert.NoError(t, err)
+		defer os.Remove(p1)
+
+		p2, err := saveExceptions(exceptions)
+		assert.NoError(t, err)
+		defer os.Remove(p2)
+
+		assert.NotEqual(t, p1, p2)
+	}
+}
+
+func TestSaveExceptionsConcurrent(t *testing.T) {
+	const goroutines = 32
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	paths := make(map[string]struct{}, goroutines)
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			exceptions := []armotypes.PostureExceptionPolicy{
+				{PortalBase: armotypes.PortalBase{Name: "ex-" + string(rune('A'+id))}},
+			}
+			path, err := saveExceptions(exceptions)
+			assert.NoError(t, err)
+			defer os.Remove(path)
+
+			buf, err := os.ReadFile(path)
+			assert.NoError(t, err)
+			var got []armotypes.PostureExceptionPolicy
+			assert.NoError(t, json.Unmarshal(buf, &got))
+			assert.Equal(t, exceptions, got)
+
+			mu.Lock()
+			paths[path] = struct{}{}
+			mu.Unlock()
+		}(i)
+	}
+	wg.Wait()
+	assert.Equal(t, goroutines, len(paths))
 }
 
 func TestSetTargetInScanInfo(t *testing.T) {
