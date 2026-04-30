@@ -98,8 +98,18 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, fmt.Errorf("failed to pull any Kubernetes resources: %s", strings.Join(combined, "; "))
 	}
 	for _, f := range failedQueries {
-		logger.L().Ctx(ctx).Warning("failed to pull resource type; affected controls will be marked skipped",
+		logger.L().Ctx(ctx).Warning("failed to pull resource type",
 			helpers.String("gvr", f.gvr), helpers.Error(f.err))
+		// InfoMap and ResourceToControlsMap are both keyed by raw GVR, not by
+		// query string, so we can only mark controls as skipped when the whole
+		// resource type is absent. If any selector-specific query succeeded and
+		// populated k8sResourcesMap[gvr], the control already has data to
+		// evaluate; marking it skipped via a sibling-query failure would be
+		// incorrect. A follow-up should introduce query-granular control mapping
+		// so partial-collection failures can be surfaced with the right scope.
+		if len(k8sResourcesMap[f.gvr]) > 0 {
+			continue
+		}
 		cautils.SetInfoMapForResources(f.err.Error(), []string{f.gvr}, sessionObj.InfoMap)
 	}
 
