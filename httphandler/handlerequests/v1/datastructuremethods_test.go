@@ -12,6 +12,7 @@ import (
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	objectsenvelopes "github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestToScanInfo(t *testing.T) {
@@ -90,23 +91,23 @@ func TestSaveExceptions(t *testing.T) {
 			{PolicyType: "postureExceptionPolicy", PortalBase: armotypes.PortalBase{Name: "ex-A"}},
 		}
 		path, err := saveExceptions(exceptions)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		defer os.Remove(path)
 
 		buf, err := os.ReadFile(path)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		var got []armotypes.PostureExceptionPolicy
-		assert.NoError(t, json.Unmarshal(buf, &got))
+		require.NoError(t, json.Unmarshal(buf, &got))
 		assert.Equal(t, exceptions, got)
 	}
 	{
 		exceptions := []armotypes.PostureExceptionPolicy{{PortalBase: armotypes.PortalBase{Name: "ex"}}}
 		p1, err := saveExceptions(exceptions)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		defer os.Remove(p1)
 
 		p2, err := saveExceptions(exceptions)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		defer os.Remove(p2)
 
 		assert.NotEqual(t, p1, p2)
@@ -127,13 +128,13 @@ func TestSaveExceptionsConcurrent(t *testing.T) {
 				{PortalBase: armotypes.PortalBase{Name: "ex-" + string(rune('A'+id))}},
 			}
 			path, err := saveExceptions(exceptions)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			defer os.Remove(path)
 
 			buf, err := os.ReadFile(path)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			var got []armotypes.PostureExceptionPolicy
-			assert.NoError(t, json.Unmarshal(buf, &got))
+			require.NoError(t, json.Unmarshal(buf, &got))
 			assert.Equal(t, exceptions, got)
 
 			mu.Lock()
