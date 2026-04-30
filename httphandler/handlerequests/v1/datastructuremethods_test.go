@@ -118,6 +118,7 @@ func TestSaveExceptionsConcurrent(t *testing.T) {
 	const goroutines = 32
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	errs := make(chan error, goroutines*3)
 	paths := make(map[string]struct{}, goroutines)
 	wg.Add(goroutines)
 
@@ -128,13 +129,22 @@ func TestSaveExceptionsConcurrent(t *testing.T) {
 				{PortalBase: armotypes.PortalBase{Name: "ex-" + string(rune('A'+id))}},
 			}
 			path, err := saveExceptions(exceptions)
-			require.NoError(t, err)
+			if err != nil {
+				errs <- err
+				return
+			}
 			defer os.Remove(path)
 
 			buf, err := os.ReadFile(path)
-			require.NoError(t, err)
+			if err != nil {
+				errs <- err
+				return
+			}
 			var got []armotypes.PostureExceptionPolicy
-			require.NoError(t, json.Unmarshal(buf, &got))
+			if err := json.Unmarshal(buf, &got); err != nil {
+				errs <- err
+				return
+			}
 			assert.Equal(t, exceptions, got)
 
 			mu.Lock()
@@ -143,6 +153,10 @@ func TestSaveExceptionsConcurrent(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
 	assert.Equal(t, goroutines, len(paths))
 }
 
