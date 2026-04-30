@@ -426,4 +426,86 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
 	})
+
+	t.Run("WildWLID constraint does not apply to manual control", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		wildWlidException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0286"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorWildWlid, WildWLID: "wlid://cluster-prod/*/deployment-*"},
+			},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{wildWlidException}, "prod-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
+	})
+
+	t.Run("multiple policies in one exception — second matches", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		multiPolicyException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{
+				{ControlID: "C-0001"}, // does not match
+				{ControlID: "C-0286"}, // matches
+			},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{}},
+			},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{multiPolicyException}, "prod-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
+	})
+
+	t.Run("multiple exceptions — first no match, second matches", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		noMatch := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0001"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{}},
+			},
+		}
+		match := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0286"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{}},
+			},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{noMatch, match}, "prod-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
+	})
+
+	t.Run("multiple resources — namespace skipped, cluster matches", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		mixedResourcesException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0286"}},
+			Resources: []identifiers.PortalDesignator{
+				// first designator has namespace — should be skipped
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{"namespace": "kube-system"}},
+				// second designator has only cluster — should match
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{"cluster": "prod-cluster"}},
+			},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{mixedResourcesException}, "prod-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
+	})
+
+	t.Run("kind constraint does not apply to manual control", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		kindException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0286"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{"kind": "Deployment"}},
+			},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{kindException}, "prod-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
+	})
 }
