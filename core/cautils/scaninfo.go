@@ -244,6 +244,22 @@ func (scanInfo *ScanInfo) contains(policyName string) bool {
 	return false
 }
 
+// splitNamespaceList parses a comma-separated namespace list (as accepted by
+// --exclude-namespaces / --include-namespaces) into a clean slice. Empty
+// entries and surrounding whitespace are dropped.
+func splitNamespaceList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
@@ -251,13 +267,12 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthand
 	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
 	metadata.ScanMetadata.Submit = scanInfo.Submit
 
-	// TODO - Add excluded and included namespaces
-	// if len(scanInfo.ExcludedNamespaces) > 1 {
-	// 	opaSessionObj.Metadata.ScanMetadata.ExcludedNamespaces = strings.Split(scanInfo.ExcludedNamespaces[1:], ",")
-	// }
-	// if len(scanInfo.IncludeNamespaces) > 1 {
-	// 	opaSessionObj.Metadata.ScanMetadata.IncludeNamespaces = strings.Split(scanInfo.IncludeNamespaces[1:], ",")
-	// }
+	if ns := splitNamespaceList(scanInfo.ExcludedNamespaces); len(ns) > 0 {
+		metadata.ScanMetadata.ExcludedNamespaces = ns
+	}
+	if ns := splitNamespaceList(scanInfo.IncludeNamespaces); len(ns) > 0 {
+		metadata.ScanMetadata.IncludeNamespaces = ns
+	}
 
 	// scan type
 	if len(scanInfo.PolicyIdentifier) > 0 {
