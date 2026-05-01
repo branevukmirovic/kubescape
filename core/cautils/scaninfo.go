@@ -140,6 +140,12 @@ type ScanInfo struct {
 	UseDefaultMatchers    bool
 	ChartPath             string
 	FilePath              string
+	HelmValueFiles        []string // -f / --values: paths to Helm values YAML files (repeatable)
+	HelmSetValues         []string // --set: Helm value overrides as key=value (repeatable)
+	HelmSetStringValues   []string // --set-string: forced-string Helm value overrides
+	HelmSetFileValues     []string // --set-file: Helm value overrides whose value is read from a file
+	HelmReleaseName       string   // --release-name: Helm release name made available as .Release.Name during render
+	HelmReleaseNamespace  string   // --release-namespace: Helm release namespace made available as .Release.Namespace
 	LabelsToCopy          []string // Labels to copy from workloads to scan reports
 	scanningContext       *ScanningContext
 	cleanups              []func()

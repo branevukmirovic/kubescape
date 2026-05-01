@@ -96,6 +96,15 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.LabelsToCopy, "labels-to-copy", nil, "Labels to copy from workloads to scan reports for easy identification. e.g: --labels-to-copy=app,team,environment")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 
+	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
+	// when scanning a Helm chart directory. Note: -f is already taken by --format, so --values is long-only.
+	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.HelmValueFiles, "values", nil, "Specify Helm values in a YAML file or a URL when scanning a Helm chart (can specify multiple)")
+	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.HelmSetValues, "set", nil, "Set Helm values on the command line when scanning a Helm chart (can specify multiple, e.g. key1=val1,key2=val2)")
+	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.HelmSetStringValues, "set-string", nil, "Set Helm STRING values on the command line when scanning a Helm chart (can specify multiple)")
+	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.HelmSetFileValues, "set-file", nil, "Set Helm values from respective files specified via the command line (can specify multiple)")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmReleaseName, "release-name", "", "Helm release name made available as .Release.Name when rendering the chart")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmReleaseNamespace, "release-namespace", "", "Helm release namespace made available as .Release.Namespace when rendering the chart")
+
 	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")
 	scanCmd.PersistentFlags().MarkDeprecated("create-account", "Create account is no longer supported. In case of a missing Account ID and a configured backend server, a new account id will be generated automatically by Kubescape. Feel free to contact the Kubescape maintainers for more information.")
 
