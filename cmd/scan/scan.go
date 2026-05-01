@@ -99,11 +99,13 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
 	// when scanning a Helm chart directory. Note: -f is already taken by --format, so --values is long-only.
 	//
-	// We use StringArrayVar (not StringSliceVar) here to match upstream Helm exactly: StringSliceVar
-	// would split each occurrence on commas, which corrupts valid strvals expressions such as
-	// `--set tolerations={a,b}` or `--set "list={x\,y}"`. StringArrayVar appends each --flag value
-	// verbatim and lets helm's own values parser handle splitting.
-	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.HelmValueFiles, "values", nil, "Specify Helm values in a YAML file or a URL when scanning a Helm chart (can specify multiple)")
+	// Flag-binding choices match upstream Helm (helm.sh/helm/v3 cmd/helm/flags.go) exactly:
+	//   --values     -> StringSliceVar : Helm splits on commas, so `--values a.yaml,b.yaml` is two files.
+	//   --set        -> StringArrayVar : verbatim; commas inside the value belong to the strvals parser
+	//                                    and must survive (e.g. `--set tolerations={a,b}`).
+	//   --set-string -> StringArrayVar : same reasoning as --set.
+	//   --set-file   -> StringArrayVar : same reasoning as --set.
+	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.HelmValueFiles, "values", nil, "Specify Helm values in a YAML file or a URL when scanning a Helm chart (can specify multiple, or separate paths with commas)")
 	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.HelmSetValues, "set", nil, "Set Helm values on the command line when scanning a Helm chart (can specify multiple, e.g. --set key1=val1 --set key2=val2)")
 	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.HelmSetStringValues, "set-string", nil, "Set Helm STRING values on the command line when scanning a Helm chart (can specify multiple)")
 	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.HelmSetFileValues, "set-file", nil, "Set Helm values from respective files specified via the command line (can specify multiple)")
