@@ -38,7 +38,11 @@ type Chart struct {
 // LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names.
 // Helm value overrides and release identity supplied via valueOpts are merged over the chart defaults before rendering.
 // Pass an empty HelmValueOptions{} to render with chart defaults only (preserves prior behavior).
-func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart) {
+//
+// If user-supplied overrides cannot be parsed (bad --set syntax, missing -f file, unreadable
+// --set-file path, etc.) the error is returned to the caller. We deliberately do not silently
+// fall back to chart defaults — scanning the wrong manifests is worse than failing fast.
+func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, error) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
@@ -47,13 +51,13 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		}
 	}
 
-	// Let us parse user-supplied value overrides once; reuse for every chart we render.
+	// Parse user-supplied value overrides once; reuse for every chart we render.
 	var userValues map[string]interface{}
 	if !valueOpts.IsEmpty() {
 		var err error
 		userValues, err = valueOpts.MergeValues()
 		if err != nil {
-			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Failed to parse Helm value overrides: %v", err))
+			return nil, nil, fmt.Errorf("failed to parse Helm value overrides: %w", err)
 		}
 	}
 	releaseOpts := valueOpts.ReleaseOptions()
@@ -82,7 +86,7 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 			}
 		}
 	}
-	return sourceToWorkloads, sourceToChart
+	return sourceToWorkloads, sourceToChart, nil
 }
 
 // mergeMaps performs a deep merge of override into a copy of base, with override winning on conflicts.

@@ -42,12 +42,12 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 		helmValueOpts := helmValueOptionsFromScanInfo(scanInfo)
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
-			workloadIDToSource, workloads, _ = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts)
+			workloadIDToSource, workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts)
 		} else {
 			workloadIDToSource, workloads, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path], helmValueOpts)
-			if err != nil {
-				return nil, allResources, nil, nil, err
-			}
+		}
+		if err != nil {
+			return nil, allResources, nil, nil, err
 		}
 		if len(workloads) == 0 {
 			continue
@@ -130,7 +130,10 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 	// Get repo root
 	repoRoot, gitRepo := extractGitRepo(clonedRepo)
 
-	helmSourceToWorkloads, helmSourceToChart := cautils.LoadResourcesFromHelmCharts(ctx, helmPath, helmValueOpts)
+	helmSourceToWorkloads, helmSourceToChart, err := cautils.LoadResourcesFromHelmCharts(ctx, helmPath, helmValueOpts)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	wlSource, ok := helmSourceToWorkloads[workloadPath]
 	if !ok {
@@ -276,7 +279,10 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	}
 
 	// load resources from helm charts
-	helmSourceToWorkloads, helmSourceToChart := cautils.LoadResourcesFromHelmCharts(ctx, path, helmValueOpts)
+	helmSourceToWorkloads, helmSourceToChart, err := cautils.LoadResourcesFromHelmCharts(ctx, path, helmValueOpts)
+	if err != nil {
+		return nil, nil, err
+	}
 	for source, ws := range helmSourceToWorkloads {
 		workloads = append(workloads, ws...)
 		helmChart := helmSourceToChart[source]

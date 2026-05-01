@@ -169,7 +169,8 @@ func TestLoadResourcesFromHelmCharts_WithOverrides(t *testing.T) {
 	opts := HelmValueOptions{
 		Values: []string{"image.pullPolicy=Never"},
 	}
-	sourceToWorkloads, _ := LoadResourcesFromHelmCharts(context.TODO(), chartPath, opts)
+	sourceToWorkloads, _, err := LoadResourcesFromHelmCharts(context.TODO(), chartPath, opts)
+	assert.NoError(t, err)
 
 	cronjobPath := filepath.Join(chartPath, "templates", "cronjob.yaml")
 	wls, ok := sourceToWorkloads[cronjobPath]
@@ -178,6 +179,21 @@ func TestLoadResourcesFromHelmCharts_WithOverrides(t *testing.T) {
 
 	jsonBytes, _ := json.Marshal(wls[0].GetObject())
 	assert.Contains(t, string(jsonBytes), `"imagePullPolicy":"Never"`, "user --set override should win over chart default")
+}
+
+// TestLoadResourcesFromHelmCharts_BadOverrideFailsFast verifies that an invalid user override
+// (here: a -f path that does not exist) is reported as an error rather than silently swallowed
+// and falling back to chart defaults. Scanning the wrong manifests would be worse than failing.
+func TestLoadResourcesFromHelmCharts_BadOverrideFailsFast(t *testing.T) {
+	o, _ := os.Getwd()
+	chartPath := filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart")
+
+	opts := HelmValueOptions{
+		ValueFiles: []string{"/nonexistent/values.yaml"},
+	}
+	_, _, err := LoadResourcesFromHelmCharts(context.TODO(), chartPath, opts)
+	assert.Error(t, err, "expected fail-fast on missing -f file")
+	assert.Contains(t, err.Error(), "Helm value overrides")
 }
 
 func TestMergeMaps_DeepMerge(t *testing.T) {
