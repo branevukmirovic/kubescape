@@ -101,18 +101,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	for _, f := range failedQueries {
 		logger.L().Ctx(ctx).Warning("failed to pull resource type",
 			helpers.String("gvr", f.gvr), helpers.Error(f.err))
-		// InfoMap and ResourceToControlsMap are both keyed by raw GVR, not by
-		// query string, so we can only mark controls as skipped when the whole
-		// resource type is absent. If any selector-specific query succeeded and
-		// populated k8sResourcesMap[gvr], the control already has data to
-		// evaluate; marking it skipped via a sibling-query failure would be
-		// incorrect. A follow-up should introduce query-granular control mapping
-		// so partial-collection failures can be surfaced with the right scope.
-		if len(k8sResourcesMap[f.gvr]) > 0 {
-			continue
-		}
-		cautils.SetInfoMapForResources(f.err.Error(), []string{f.gvr}, sessionObj.InfoMap)
 	}
+	recordFailedQueryStatuses(failedQueries, k8sResourcesMap, sessionObj.InfoMap)
 
 	// add single resource to k8s resources map (for single resource scan)
 	if !scanInfo.IsDeletedScanObject {
@@ -379,6 +369,24 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 	}
 
 	return k8sResources, allResources, failedQueries
+}
+
+// recordFailedQueryStatuses writes a StatusSkipped entry to infoMap for each
+// failed GVR that has no successfully collected resources in k8sResources.
+// InfoMap and ResourceToControlsMap are both keyed by raw GVR, not by query
+// string, so we can only mark controls as skipped when the whole resource type
+// is absent. If any selector-specific query succeeded and populated
+// k8sResources[gvr], the control already has data to evaluate; marking it
+// skipped via a sibling-query failure would be incorrect. A follow-up should
+// introduce query-granular control mapping so partial-collection failures can
+// be surfaced with the right scope.
+func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResources cautils.K8SResources, infoMap map[string]apis.StatusInfo) {
+	for _, f := range failedQueries {
+		if len(k8sResources[f.gvr]) > 0 {
+			continue
+		}
+		cautils.SetInfoMapForResources(f.err.Error(), []string{f.gvr}, infoMap)
+	}
 }
 
 func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, error) {

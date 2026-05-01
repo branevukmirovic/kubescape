@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stesting "k8s.io/client-go/testing"
@@ -89,16 +90,38 @@ func TestPullResources_NotFoundErrorIgnored(t *testing.T) {
 }
 
 // TestPullResources_PartialFailure verifies that when one GVR succeeds and
-// another fails, only the failed GVR appears in failedQueries and allResources
-// is still non-empty (scan continues).
+// another fails, only the failed GVR appears in failedQueries AND the
+// successful resource still lands in allResources / k8sResources — proving the
+// "scan continues" half of the contract, not just the "error is recorded" half.
 func TestPullResources_PartialFailure(t *testing.T) {
 	forbiddenGVR := "rbac.authorization.k8s.io/v1/clusterrolebindings"
+	podsGVR := "/v1/pods"
+
+	pod := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]interface{}{
+				"name":      "pod-survives",
+				"namespace": "default",
+			},
+		},
+	}
+	podList := &unstructured.UnstructuredList{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "PodList",
+		},
+		Items: []unstructured.Unstructured{*pod},
+	}
 
 	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
 		if action.GetResource().Resource == "clusterrolebindings" {
 			return true, nil, fmt.Errorf("forbidden: cannot list clusterrolebindings")
 		}
-		// pods succeeds — return empty list
+		if action.GetResource().Resource == "pods" {
+			return true, podList, nil
+		}
 		return false, nil, nil
 	})
 
@@ -106,16 +129,24 @@ func TestPullResources_PartialFailure(t *testing.T) {
 		forbiddenGVR: QueryableResource{
 			GroupVersionResourceTriplet: forbiddenGVR,
 		},
-		"/v1/pods": QueryableResource{
-			GroupVersionResourceTriplet: "/v1/pods",
+		podsGVR: QueryableResource{
+			GroupVersionResourceTriplet: podsGVR,
 		},
 	}
 
-	_, _, failedQueries := handler.pullResources(qrs, &EmptySelector{})
+	k8sResources, allResources, failedQueries := handler.pullResources(qrs, &EmptySelector{})
 
+	// failed query is recorded
 	assert.Len(t, failedQueries, 1)
 	for _, f := range failedQueries {
 		assert.Equal(t, forbiddenGVR, f.gvr)
+	}
+
+	// successful pod survives in both maps — this is what "scan continues" means
+	assert.Len(t, allResources, 1, "the successful pod must still be collected")
+	assert.Len(t, k8sResources[podsGVR], 1, "k8sResources[pods] must contain the surviving pod ID")
+	for id := range allResources {
+		assert.Contains(t, id, "pod-survives")
 	}
 }
 
@@ -141,14 +172,14 @@ func TestPullResources_TotalFailure(t *testing.T) {
 	assert.Len(t, failedQueries, 2, "both failed GVRs should be recorded")
 }
 
-// TestGetResources_InfoMapWrittenWhenGVRTotallyAbsent verifies that when a GVR
-// fails and k8sResourcesMap has no data for it, the GVR is written to InfoMap
-// so mapControlToInfo can mark the affected controls as skipped.
-func TestGetResources_InfoMapWrittenWhenGVRTotallyAbsent(t *testing.T) {
+// TestRecordFailedQueryStatuses_WrittenWhenGVRTotallyAbsent verifies that when
+// a GVR fails and k8sResources has no data for it, the helper writes a
+// StatusSkipped entry into infoMap so mapControlToInfo can mark the affected
+// controls as skipped. Drives the real production helper, not an inlined copy.
+func TestRecordFailedQueryStatuses_WrittenWhenGVRTotallyAbsent(t *testing.T) {
 	failedGVR := "rbac.authorization.k8s.io/v1/clusterrolebindings"
 	infoMap := map[string]apis.StatusInfo{}
 
-	// simulate: the GVR failed AND k8sResourcesMap has no entries for it
 	k8sResourcesMap := cautils.K8SResources{
 		failedGVR: []string{}, // empty — no successful pull
 	}
@@ -156,12 +187,7 @@ func TestGetResources_InfoMapWrittenWhenGVRTotallyAbsent(t *testing.T) {
 		failedGVR: {gvr: failedGVR, err: fmt.Errorf("forbidden")},
 	}
 
-	for _, f := range failedQueries {
-		if len(k8sResourcesMap[f.gvr]) > 0 {
-			continue
-		}
-		cautils.SetInfoMapForResources(f.err.Error(), []string{f.gvr}, infoMap)
-	}
+	recordFailedQueryStatuses(failedQueries, k8sResourcesMap, infoMap)
 
 	info, ok := infoMap[failedGVR]
 	require.True(t, ok, "InfoMap should have an entry for the failed GVR")
@@ -169,15 +195,15 @@ func TestGetResources_InfoMapWrittenWhenGVRTotallyAbsent(t *testing.T) {
 	assert.Contains(t, info.InnerInfo, "forbidden")
 }
 
-// TestGetResources_InfoMapNotWrittenWhenGVRHasData verifies that when a GVR
-// failed for one field-selector query but another query for the same GVR
-// succeeded and populated k8sResourcesMap, InfoMap is NOT written — preventing
-// controls from being incorrectly marked skipped when they do have data.
-func TestGetResources_InfoMapNotWrittenWhenGVRHasData(t *testing.T) {
+// TestRecordFailedQueryStatuses_NotWrittenWhenGVRHasData verifies that when a
+// GVR failed for one field-selector query but another query for the same GVR
+// succeeded and populated k8sResources, the helper does NOT write to infoMap —
+// preventing controls from being incorrectly marked skipped when they do have
+// data. Drives the real production helper.
+func TestRecordFailedQueryStatuses_NotWrittenWhenGVRHasData(t *testing.T) {
 	gvr := "/v1/pods"
 	infoMap := map[string]apis.StatusInfo{}
 
-	// One namespace selector succeeded and added a resource ID.
 	k8sResourcesMap := cautils.K8SResources{
 		gvr: []string{"default/pod-abc"},
 	}
@@ -185,12 +211,7 @@ func TestGetResources_InfoMapNotWrittenWhenGVRHasData(t *testing.T) {
 		gvr + "/metadata.namespace=prod": {gvr: gvr, err: fmt.Errorf("forbidden for prod")},
 	}
 
-	for _, f := range failedQueries {
-		if len(k8sResourcesMap[f.gvr]) > 0 {
-			continue
-		}
-		cautils.SetInfoMapForResources(f.err.Error(), []string{f.gvr}, infoMap)
-	}
+	recordFailedQueryStatuses(failedQueries, k8sResourcesMap, infoMap)
 
-	assert.Empty(t, infoMap, "InfoMap should NOT be written when k8sResourcesMap already has data for the GVR")
+	assert.Empty(t, infoMap, "InfoMap should NOT be written when k8sResources already has data for the GVR")
 }
