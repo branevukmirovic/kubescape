@@ -35,9 +35,15 @@ func getPortForwardingPort() string {
 	return DefaultPortForwardPortValue
 }
 
+func stripScheme(host string) string {
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimPrefix(host, "http://")
+	return host
+}
+
 func CreatePortForwarder(k8sClient *k8sinterface.KubernetesApi, pod *v1.Pod, forwardingPort, namespace string) (OperatorConnector, error) {
 	path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", namespace, pod.Name)
-	hostIP := strings.TrimLeft(k8sClient.K8SConfig.Host, "htps:/")
+	hostIP := stripScheme(k8sClient.K8SConfig.Host)
 	serverURL := &url.URL{Scheme: "https", Path: path, Host: hostIP}
 
 	roundTripper, upgrader, err := spdy.RoundTripperFor(k8sClient.K8SConfig)

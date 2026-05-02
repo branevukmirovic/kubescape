@@ -21,6 +21,66 @@ type FakeCachedDiscoveryClient struct {
 	Invalidations      int
 }
 
+func Test_stripScheme(t *testing.T) {
+	testCases := []struct {
+		name string
+		host string
+		want string
+	}{
+		{
+			name: "https scheme is stripped",
+			host: "https://1.2.3.4:6443",
+			want: "1.2.3.4:6443",
+		},
+		{
+			name: "http scheme is stripped",
+			host: "http://1.2.3.4:6443",
+			want: "1.2.3.4:6443",
+		},
+		{
+			name: "host without scheme is returned unchanged",
+			host: "1.2.3.4:6443",
+			want: "1.2.3.4:6443",
+		},
+		{
+			name: "empty host is returned unchanged",
+			host: "",
+			want: "",
+		},
+		{
+			name: "hostname starting with 'h' is preserved after https scheme",
+			host: "https://hello-cluster.example.com:6443",
+			want: "hello-cluster.example.com:6443",
+		},
+		{
+			name: "hostname starting with 't' is preserved after https scheme",
+			host: "https://test.example.com:6443",
+			want: "test.example.com:6443",
+		},
+		{
+			name: "hostname starting with 'p' is preserved after https scheme",
+			host: "https://prod.example.com",
+			want: "prod.example.com",
+		},
+		{
+			name: "hostname starting with 's' is preserved after https scheme",
+			host: "https://staging.example.com",
+			want: "staging.example.com",
+		},
+		{
+			name: "kubernetes.docker.internal is preserved",
+			host: "https://kubernetes.docker.internal:6443",
+			want: "kubernetes.docker.internal:6443",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, stripScheme(tc.host))
+		})
+	}
+}
+
 func Test_getPortForwardingPort(t *testing.T) {
 	testCases := []struct {
 		name          string
