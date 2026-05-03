@@ -54,7 +54,11 @@ func (t *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 				{Path: "README.md"},
 			},
 		}
-		responseBody, _ = json.Marshal(tree)
+		var marshalErr error
+		responseBody, marshalErr = json.Marshal(tree)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("mockTransport: failed to marshal tree: %w", marshalErr)
+		}
 	} else {
 		return nil, fmt.Errorf("unexpected mocked request: %s", req.URL.Path)
 	}
