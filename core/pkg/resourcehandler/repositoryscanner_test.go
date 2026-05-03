@@ -3,8 +3,10 @@ package resourcehandler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"reflect"
 	"testing"
 
@@ -54,7 +56,7 @@ func (t *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		responseBody, _ = json.Marshal(tree)
 	} else {
-		responseBody = []byte(`{}`)
+		return nil, fmt.Errorf("unexpected mocked request: %s", req.URL.Path)
 	}
 
 	return &http.Response{
@@ -64,8 +66,12 @@ func (t *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func init() {
+func TestMain(m *testing.M) {
+	originalTransport := defaultHTTPClient.Transport
 	defaultHTTPClient.Transport = &mockTransport{}
+	code := m.Run()
+	defaultHTTPClient.Transport = originalTransport
+	os.Exit(code)
 }
 
 func newMockGitHubRepository(path string, isFile bool) *GitHubRepository {

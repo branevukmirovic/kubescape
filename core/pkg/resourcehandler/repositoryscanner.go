@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	giturls "github.com/chainguard-dev/git-urls"
 	"k8s.io/utils/strings/slices"
@@ -49,7 +50,9 @@ type githubDefaultBranchAPI struct {
 	DefaultBranch string `json:"default_branch"`
 }
 
-var defaultHTTPClient = &http.Client{}
+var defaultHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+}
 
 func NewGitHubRepository() *GitHubRepository {
 	return &GitHubRepository{
