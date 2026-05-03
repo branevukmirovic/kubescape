@@ -34,6 +34,10 @@ type mockTransport struct{}
 func (t *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	var responseBody []byte
 
+	if req.URL.Host != "api.github.com" {
+		return nil, fmt.Errorf("unexpected mocked host: %s", req.URL.Host)
+	}
+
 	if req.URL.Path == "/repos/kubescape/kubescape" {
 		responseBody = []byte(`{"default_branch": "master"}`)
 	} else if req.URL.Path == "/repos/kubescape/kubescape/git/trees/master" || req.URL.Path == "/repos/kubescape/kubescape/git/trees/dev" {
