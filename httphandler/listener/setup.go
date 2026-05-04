@@ -79,8 +79,11 @@ func SetupHTTPListener() error {
 }
 
 func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
-	if keyFile == "" || certFile == "" {
+	switch {
+	case certFile == "" && keyFile == "":
 		return nil, nil
+	case certFile == "" || keyFile == "":
+		return nil, fmt.Errorf("both KS_CERT_FILE and KS_KEY_FILE must be set to enable TLS (got certFile=%q, keyFile=%q)", certFile, keyFile)
 	}
 
 	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
