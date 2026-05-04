@@ -35,8 +35,14 @@ type Chart struct {
 	Path string
 }
 
-// LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
-func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, map[string]Chart) {
+// LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names.
+// Helm value overrides and release identity supplied via valueOpts are merged over the chart defaults before rendering.
+// Pass an empty HelmValueOptions{} to render with chart defaults only (preserves prior behavior).
+//
+// If user-supplied overrides cannot be parsed (bad --set syntax, missing -f file, unreadable
+// --set-file path, etc.) the error is returned to the caller. We deliberately do not silently
+// fall back to chart defaults — scanning the wrong manifests is worse than failing fast.
+func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, error) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
@@ -45,12 +51,27 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 		}
 	}
 
+	// Parse user-supplied value overrides once; reuse for every chart we render.
+	var userValues map[string]interface{}
+	if !valueOpts.IsEmpty() {
+		var err error
+		userValues, err = valueOpts.MergeValues()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse Helm value overrides: %w", err)
+		}
+	}
+	releaseOpts := valueOpts.ReleaseOptions()
+
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
 	sourceToChart := make(map[string]Chart, 0)
 	for _, helmDir := range helmDirectories {
 		chart, err := NewHelmChart(helmDir)
 		if err == nil {
-			wls, errs := chart.GetWorkloadsWithDefaultValues()
+			values := chart.GetDefaultValues()
+			if userValues != nil {
+				values = mergeMaps(values, userValues)
+			}
+			wls, errs := chart.GetWorkloadsWithOptions(values, releaseOpts)
 			if len(errs) > 0 {
 				logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
 				continue
@@ -65,7 +86,27 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 			}
 		}
 	}
-	return sourceToWorkloads, sourceToChart
+	return sourceToWorkloads, sourceToChart, nil
+}
+
+// mergeMaps performs a deep merge of override into a copy of base, with override winning on conflicts.
+// This mirrors helm.sh/helm/v3 internal `chartutil.CoalesceTables` semantics for values overlay
+// and is used to layer user --set/-f values over a chart's defaults before rendering.
+func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(base))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range override {
+		if vMap, ok := v.(map[string]interface{}); ok {
+			if baseMap, ok := out[k].(map[string]interface{}); ok {
+				out[k] = mergeMaps(baseMap, vMap)
+				continue
+			}
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will
