@@ -40,7 +40,7 @@ func (t *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	if req.URL.Path == "/repos/kubescape/kubescape" {
 		responseBody = []byte(`{"default_branch": "master"}`)
-	} else if req.URL.Path == "/repos/kubescape/kubescape/git/trees/master" || req.URL.Path == "/repos/kubescape/kubescape/git/trees/dev" {
+	} else if (req.URL.Path == "/repos/kubescape/kubescape/git/trees/master" || req.URL.Path == "/repos/kubescape/kubescape/git/trees/dev") && req.URL.RawQuery == "recursive=1" {
 		tree := tree{
 			InnerTrees: []innerTree{
 				{Path: "examples/online-boutique/adservice.yaml"},
