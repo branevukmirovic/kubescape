@@ -24,6 +24,7 @@ type portForward struct {
 	localPort string
 	stopChan  chan struct{}
 	readyChan chan struct{}
+	errChan   chan error
 	out       *bytes.Buffer
 	errOut    *bytes.Buffer
 }
@@ -59,13 +60,22 @@ func CreatePortForwarder(k8sClient *k8sinterface.KubernetesApi, pod *v1.Pod, for
 		localPort:     getPortForwardingPort(),
 		stopChan:      stopChan,
 		readyChan:     readyChan,
+		errChan:       make(chan error, 1),
 		out:           out,
 		errOut:        errOut,
 	}, nil
 }
 
-func (p *portForward) waitForPortForwardReadiness() struct{} {
-	return <-p.readyChan
+func (p *portForward) waitForPortForwardReadiness() error {
+	select {
+	case <-p.readyChan:
+		return nil
+	case err := <-p.errChan:
+		if err == nil {
+			err = fmt.Errorf("port-forward exited before becoming ready: %s", strings.TrimSpace(p.errOut.String()))
+		}
+		return err
+	}
 }
 
 func (p *portForward) GetPortForwardLocalhost() string {
@@ -78,9 +88,7 @@ func (p *portForward) StopPortForwarder() {
 
 func (p *portForward) StartPortForwarder() error {
 	go func() {
-		p.ForwardPorts()
+		p.errChan <- p.ForwardPorts()
 	}()
-	p.waitForPortForwardReadiness()
-
-	return nil
+	return p.waitForPortForwardReadiness()
 }
