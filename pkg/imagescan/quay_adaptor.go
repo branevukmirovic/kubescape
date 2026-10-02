@@ -382,8 +382,9 @@ func (w *quayAPIWrapper) DoRequestWithHeaders(ctx context.Context, method, path 
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests && attempt < w.maxRetries {
-			// Rate limited: inspect Retry-After header if present
-			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), w.retryBackoff)
+			// Rate limited: inspect Retry-After header if present; fall back to exponential backoff
+			backoff := quayExponentialBackoff(w.retryBackoff, attempt)
+			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), backoff)
 			_ = resp.Body.Close()
 			cancel()
 			select {
@@ -462,6 +463,33 @@ func parseRetryAfter(header string, defaultBackoff time.Duration) time.Duration 
 		}
 	}
 	return defaultBackoff
+}
+
+// quayExponentialBackoff calculates the exponential backoff duration for a given retry attempt,
+// capped at maxQuayRetryAfter. It checks boundaries and saturates before shifting or multiplying
+// to prevent signed integer overflow on large attempt numbers (e.g. attempt >= 35 with a 500ms base).
+func quayExponentialBackoff(base time.Duration, attempt int) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	if base >= maxQuayRetryAfter {
+		return maxQuayRetryAfter
+	}
+	if attempt <= 0 {
+		return base
+	}
+	// For any attempt >= 62, 1<<attempt would overflow a signed 64-bit integer.
+	// Furthermore, if (1<<attempt) exceeds maxQuayRetryAfter/base, multiplying
+	// base * (1<<attempt) would exceed maxQuayRetryAfter (or overflow int64).
+	// In either case, saturate to maxQuayRetryAfter before shifting or multiplying.
+	if attempt >= 62 || (time.Duration(1<<attempt) > maxQuayRetryAfter/base) {
+		return maxQuayRetryAfter
+	}
+	backoff := base * time.Duration(1<<attempt)
+	if backoff > maxQuayRetryAfter {
+		return maxQuayRetryAfter
+	}
+	return backoff
 }
 
 // QuayAdaptorConfig defines configurable parameters for QuayAdaptor.
@@ -1113,6 +1141,10 @@ func (a *QuayAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contai
 			return status, nil
 		}
 
+		if imageID.Hash == "" {
+			status.ImageID.Hash = manifestRef
+		}
+
 		path := quayManifestSecurityPath(org, repo, manifestRef, false)
 		data, err := client.DoRequest(ctx, http.MethodGet, path)
 		if err != nil {
@@ -1148,6 +1180,9 @@ func (a *QuayAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contai
 				}
 				if err := json.Unmarshal(retryData, &retryPayload); err != nil {
 					return status, fmt.Errorf("failed to parse scan status payload for child manifest %s/%s@%s: %w", org, repo, childDigest, err)
+				}
+				if imageID.Hash == "" {
+					status.ImageID.Hash = childDigest
 				}
 				switch strings.ToLower(retryPayload.Status) {
 				case "scanned":
@@ -1243,6 +1278,10 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 			return report, nil
 		}
 
+		if imageID.Hash == "" {
+			report.ImageID.Hash = manifestRef
+		}
+
 		path := quayManifestSecurityPath(org, repo, manifestRef, true)
 		data, err := client.DoRequest(ctx, http.MethodGet, path)
 		if err != nil {
@@ -1276,6 +1315,9 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 				var retryPayload quayVulnerabilityPayload
 				if err := json.Unmarshal(retryData, &retryPayload); err != nil {
 					return report, fmt.Errorf("failed to parse vulnerability payload for child manifest %s/%s@%s: %w", org, repo, childDigest, err)
+				}
+				if imageID.Hash == "" {
+					report.ImageID.Hash = childDigest
 				}
 				switch strings.ToLower(retryPayload.Status) {
 				case "scanned":
